@@ -1,0 +1,7 @@
+dashboard/node_modules/
+dashboard/dist/
+dashboard/.netlify/
+waf/.fly/
+waf/bin/
+*.log
+.DS_Store
