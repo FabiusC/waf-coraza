@@ -36,7 +36,22 @@ npm install
 npm run dev
 ```
 
-Para Netlify, define `VITE_WAF_API_URL` apuntando a la URL pública del backend en Fly.io.
+Para local, puedes usar un archivo `.env` dentro de `dashboard/`:
+
+```bash
+VITE_WAF_API_URL=http://localhost:8080
+```
+
+### Deploy del dashboard en Netlify desde GitHub
+
+1. En Netlify, usa **Add new site** -> **Import an existing project**.
+2. Conecta GitHub y selecciona este repositorio.
+3. No cambies Build settings manualmente: Netlify leerá `netlify.toml` desde la raíz del repo.
+4. En **Site configuration** -> **Environment variables**, crea:
+   - `VITE_WAF_API_URL` = URL pública del backend (Fly.io o túnel Cloudflare).
+5. Ejecuta el primer deploy.
+
+Con esto, cada push a `main` dispara un nuevo deploy automático en Netlify.
 
 ## Flujo recomendado
 
