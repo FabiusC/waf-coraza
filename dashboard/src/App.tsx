@@ -50,8 +50,8 @@ const attackScenarios: AttackScenario[] = [
   {
     id: 'path-traversal',
     title: 'Intento path traversal',
-    description: 'Incluye ../ para disparar deteccion de ruta sospechosa.',
-    path: '/../../etc/passwd',
+    description: 'Incluye traversal en parametro file para disparar la regla ARGS.',
+    path: '/app?file=../../etc/passwd',
     expectedBlocked: true,
   },
   {

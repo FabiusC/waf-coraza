@@ -159,13 +159,27 @@ func main() {
 
 func createWAF() (coraza.WAF, error) {
 	return coraza.NewWAF(coraza.NewWAFConfig().WithDirectives(`
-SecRule REQUEST_URI "@contains /admin" "id:1001,phase:2,deny,status:403,log,msg:'Acceso a /admin bloqueado'"
-SecRule REQUEST_URI "@contains /wp-admin" "id:1002,phase:2,deny,status:403,log,msg:'Acceso a /wp-admin bloqueado'"
-SecRule REQUEST_URI "@contains /phpmyadmin" "id:1003,phase:2,deny,status:403,log,msg:'Acceso a /phpmyadmin bloqueado'"
-SecRule REQUEST_URI "@rx (?i)(\\.\\.)/|\\.\\\\/" "id:1004,phase:2,deny,status:403,log,msg:'Path traversal detectado'"
-SecRule REQUEST_URI "@rx (?i)union.*select" "id:1005,phase:2,deny,status:403,log,msg:'Patron SQLi detectado'"
-SecRule REQUEST_URI "@rx (?i)%3Cscript|<script" "id:1006,phase:2,deny,status:403,log,msg:'XSS detectado'"
-SecRule REQUEST_HEADERS:User-Agent "@rx (?i)(sqlmap|nikto|nmap)" "id:1007,phase:2,deny,status:403,log,msg:'User-agent malicioso'"
+SecRuleEngine On
+SecDefaultAction "phase:2,log,deny,status:403"
+SecRequestBodyAccess On
+SecRequestBodyLimit 134217728
+
+# SQL Injection detection
+SecRule ARGS "@rx (?i)union.*select" "id:100,phase:2,deny,status:403,msg:'SQL Injection attempt detected'"
+
+# Malicious User-Agent detection
+SecRule REQUEST_HEADERS:User-Agent "@rx (?i)(sqlmap|nikto|nmap|masscan)" "id:101,phase:2,deny,status:403,msg:'Malicious bot detectado'"
+
+# Admin path protection
+SecRule REQUEST_URI "@contains /admin" "id:102,phase:2,deny,status:403,msg:'Acceso a admin bloqueado'"
+
+# Path traversal protection
+SecRule REQUEST_URI "@rx (?i)(\.\./|\.\\\\)" "id:103,phase:2,deny,status:403,msg:'Path traversal detectado'"
+SecRule REQUEST_URI "@contains %2e%2e" "id:105,phase:2,deny,status:403,msg:'Path traversal encoded detectado'"
+SecRule ARGS "@rx (?i)(\.\./|%2e%2e%2f|%2e%2e/)" "id:106,phase:2,deny,status:403,msg:'Path traversal en parametros detectado'"
+
+# XSS detection
+SecRule ARGS "@rx (?i)(<script|%3Cscript)" "id:104,phase:2,deny,status:403,msg:'XSS attempt detectado'"
 `))
 }
 
@@ -213,6 +227,10 @@ func wafMiddleware(waf coraza.WAF, store *Store, next http.Handler) http.Handler
 		}
 
 		interruption := tx.ProcessRequestHeaders()
+		if interruption == nil {
+			// Phase 2 rules (e.g. ARGS and request body) run here.
+			interruption, _ = tx.ProcessRequestBody()
+		}
 		summary := summarizeRules(tx.MatchedRules())
 
 		if interruption != nil {
