@@ -338,6 +338,109 @@ th {
     font-size: 13px;
 }
 
+.console-section {
+    margin-bottom: 18px;
+}
+
+.console-wrap {
+    font-family: Consolas, "Courier New", monospace;
+    font-size: 12px;
+    background: rgba(10, 10, 20, 0.6);
+    border-radius: 12px;
+    padding: 12px;
+    max-height: 480px;
+    overflow-y: auto;
+    border: 1px solid rgba(94, 234, 212, 0.1);
+}
+
+.console-empty {
+    color: var(--muted);
+    padding: 16px;
+    text-align: center;
+}
+
+.console-entry {
+    margin-bottom: 14px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.console-entry:last-child {
+    border-bottom: none;
+    margin-bottom: 0;
+    padding-bottom: 0;
+}
+
+.console-header {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 6px;
+    font-size: 11px;
+    color: var(--muted);
+}
+
+.console-status {
+    font-weight: 700;
+    padding: 2px 6px;
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.console-status.blocked {
+    color: var(--danger);
+    background: rgba(251, 113, 133, 0.14);
+}
+
+.console-status.allowed {
+    color: var(--success);
+    background: rgba(52, 211, 153, 0.12);
+}
+
+.console-time {
+    color: var(--accent-2);
+}
+
+.console-from {
+    color: var(--accent);
+}
+
+.console-command {
+    margin: 8px 0;
+    padding: 8px;
+    background: rgba(255, 255, 255, 0.03);
+    border-left: 2px solid var(--accent-2);
+    border-radius: 4px;
+    overflow-x: auto;
+    color: #e0e0e0;
+}
+
+.console-command code {
+    word-break: break-all;
+}
+
+.console-message,
+.console-rules {
+    margin: 6px 0;
+    font-size: 11px;
+    color: var(--muted);
+}
+
+.console-label {
+    color: var(--danger);
+    font-weight: 700;
+    margin-right: 4px;
+}
+
+.console-text {
+    color: #ffd7df;
+}
+
+.console-divider {
+    margin-top: 8px;
+    color: rgba(255, 255, 255, 0.1);
+    font-size: 10px;
+}
+
 .error-banner {
     margin-top: 18px;
     padding: 14px 16px;

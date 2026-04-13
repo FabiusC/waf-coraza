@@ -10,6 +10,8 @@ export type Event = {
   messages: string;
   transactionId: string;
   durationMs: number;
+  curlCommand?: string;
+  responseBody?: string;
 };
 
 export type Snapshot = {

@@ -31,6 +31,8 @@ type Event struct {
 	Messages      string `json:"messages"`
 	TransactionID string `json:"transactionId"`
 	DurationMS    int64  `json:"durationMs"`
+	CurlCommand   string `json:"curlCommand"`
+	ResponseBody  string `json:"responseBody,omitempty"`
 }
 
 type Stats struct {
@@ -157,8 +159,13 @@ func main() {
 
 func createWAF() (coraza.WAF, error) {
 	return coraza.NewWAF(coraza.NewWAFConfig().WithDirectives(`
-SecRule REQUEST_URI "@rx (?i)(/admin|/wp-admin|/phpmyadmin|\.\./|union\s+select|<script)" "id:1001,phase:1,deny,status:403,log,msg:'ruta sospechosa detectada'"
-SecRule REQUEST_HEADERS:User-Agent "@rx (?i)(sqlmap|nikto|nmap|masscan|python-requests)" "id:1002,phase:1,deny,status:403,log,msg:'user-agent malicioso detectado'"
+SecRule REQUEST_URI "@beginsWith /admin" "id:1001,phase:2,deny,status:403,log,msg:'Acceso a /admin bloqueado'"
+SecRule REQUEST_URI "@beginsWith /wp-admin" "id:1002,phase:2,deny,status:403,log,msg:'Acceso a /wp-admin bloqueado'"
+SecRule REQUEST_URI "@beginsWith /phpmyadmin" "id:1003,phase:2,deny,status:403,log,msg:'Acceso a /phpmyadmin bloqueado'"
+SecRule REQUEST_URI "@rx \.\./" "id:1004,phase:2,deny,status:403,log,msg:'Path traversal detectado'"
+SecRule REQUEST_URI "@rx (?i)union\s+select" "id:1005,phase:2,deny,status:403,log,msg:'Patron SQLi detectado'"
+SecRule REQUEST_URI "@rx (?i)<script" "id:1006,phase:2,deny,status:403,log,msg:'XSS detectado'"
+SecRule REQUEST_HEADERS:User-Agent "@rx (?i)(sqlmap|nikto|nmap|masscan|python-requests)" "id:1007,phase:1,deny,status:403,log,msg:'User-agent malicioso'"
 `))
 }
 
@@ -234,6 +241,7 @@ func wafMiddleware(waf coraza.WAF, store *Store, next http.Handler) http.Handler
 }
 
 func newEvent(r *http.Request, transactionID string, statusCode int, blocked bool, summary ruleSummary, duration time.Duration) Event {
+	curl := buildCurlCommand(r)
 	return Event{
 		Time:          time.Now().Format(time.RFC3339),
 		Method:        r.Method,
@@ -246,7 +254,27 @@ func newEvent(r *http.Request, transactionID string, statusCode int, blocked boo
 		Messages:      strings.Join(summary.messages, "; "),
 		TransactionID: transactionID,
 		DurationMS:    duration.Milliseconds(),
+		CurlCommand:   curl,
 	}
+}
+
+func buildCurlCommand(r *http.Request) string {
+	cmd := fmt.Sprintf("curl -X %s", r.Method)
+	if ua := r.UserAgent(); ua != "" {
+		cmd += fmt.Sprintf(" -H 'User-Agent: %s'", ua)
+	}
+	cmd += fmt.Sprintf(" '%s://%s%s'", getScheme(r), r.Host, r.URL.RequestURI())
+	return cmd
+}
+
+func getScheme(r *http.Request) string {
+	if r.TLS != nil {
+		return "https"
+	}
+	if scheme := r.Header.Get("X-Forwarded-Proto"); scheme != "" {
+		return scheme
+	}
+	return "http"
 }
 
 func summarizeRules(rules []types.MatchedRule) ruleSummary {

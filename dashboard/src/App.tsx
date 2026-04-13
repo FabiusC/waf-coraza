@@ -288,6 +288,54 @@ function App() {
         </article>
       </section>
 
+      <section className="console-section">
+        <article className="card panel">
+          <div className="panel-head">
+            <div>
+              <span className="label">Consola de tráfico</span>
+              <h2>Detalle completo de solicitudes</h2>
+            </div>
+            <span className="chip">Tiempo real</span>
+          </div>
+
+          <div className="console-wrap">
+            {snapshot.recent.length === 0 ? (
+              <div className="console-empty">
+                <span>$ # Sin tráfico registrado</span>
+              </div>
+            ) : (
+              snapshot.recent.map((event) => (
+                <div className="console-entry" key={event.transactionId + event.time}>
+                  <div className="console-header">
+                    <span className={`console-status ${event.blocked ? 'blocked' : 'allowed'}`}>
+                      {event.status}
+                    </span>
+                    <span className="console-time">{formatTime(event.time)}</span>
+                    <span className="console-from">{event.clientIp}</span>
+                  </div>
+                  <div className="console-command">
+                    <code>{event.curlCommand || `curl '${event.method} ${event.path}'`}</code>
+                  </div>
+                  {event.messages && (
+                    <div className="console-message">
+                      <span className="console-label">WAF:</span>
+                      <span className="console-text">{event.messages}</span>
+                    </div>
+                  )}
+                  {event.ruleIds && (
+                    <div className="console-rules">
+                      <span className="console-label">Reglas:</span>
+                      <span className="console-text">{event.ruleIds}</span>
+                    </div>
+                  )}
+                  <div className="console-divider">—</div>
+                </div>
+              ))
+            )}
+          </div>
+        </article>
+      </section>
+
       <section className="content-grid">
         <article className="card panel">
           <div className="panel-head">
