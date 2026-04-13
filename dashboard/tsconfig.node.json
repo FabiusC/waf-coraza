@@ -1,8 +1,16 @@
 {
     "compilerOptions": {
         "composite": true,
+        "target": "ESNext",
+        "lib": [
+            "ESNext"
+        ],
         "module": "ESNext",
         "moduleResolution": "Bundler",
+        "types": [
+            "node"
+        ],
+        "noEmit": true,
         "allowSyntheticDefaultImports": true,
         "ignoreDeprecations": "6.0"
     },
