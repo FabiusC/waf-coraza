@@ -266,19 +266,38 @@ function App() {
               </div>
             ) : (
               attackRuns.map((run) => {
-                const matchExpected = run.error ? false : run.blocked === run.expectedBlocked;
+                const wasBlocked = run.status === 403;
+                const matchExpected = run.error ? false : wasBlocked === run.expectedBlocked;
+                
+                let resultLabel = '';
+                let resultClass = '';
+                
+                if (run.error) {
+                  resultLabel = 'ERROR DE CONEXIÓN';
+                  resultClass = 'result-error';
+                } else if (wasBlocked) {
+                  resultLabel = '✓ BLOQUEADO por WAF';
+                  resultClass = 'result-blocked';
+                } else if (run.expectedBlocked) {
+                  resultLabel = '✗ NO BLOQUEADO (debería estarlo)';
+                  resultClass = 'result-missed';
+                } else {
+                  resultLabel = '✓ PERMITIDO (correcto)';
+                  resultClass = 'result-allowed';
+                }
+                
                 return (
-                  <div className="run-item" key={run.id}>
+                  <div className={`run-item ${resultClass}`} key={run.id}>
                     <div className="attack-item-head">
                       <strong>{run.title}</strong>
-                      <span className={`pill ${matchExpected ? 'pill-ok' : 'pill-danger'}`}>
-                        {matchExpected ? 'Comportamiento esperado' : 'Revisar regla'}
+                      <span className={`pill pill-result ${resultClass}`}>
+                        {resultLabel}
                       </span>
                     </div>
                     <div className="run-path">{run.path}</div>
                     <div className="run-meta muted">
                       <span>{formatTime(run.time)}</span>
-                      <span>{run.error ? `Error: ${run.error}` : `HTTP ${run.status}`}</span>
+                      <span>HTTP {run.status || 'N/A'}</span>
                     </div>
                   </div>
                 );
