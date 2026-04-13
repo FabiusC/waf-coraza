@@ -48,7 +48,8 @@ body {
 
 .hero-grid,
 .content-grid,
-.metrics-grid {
+.metrics-grid,
+.attack-grid {
     display: grid;
     gap: 18px;
 }
@@ -137,6 +138,11 @@ h1 {
 .metrics-grid {
     grid-template-columns: repeat(4, minmax(0, 1fr));
     margin: 18px 0;
+}
+
+.attack-grid {
+    grid-template-columns: 1fr 1fr;
+    margin-bottom: 18px;
 }
 
 .metric {
@@ -274,6 +280,64 @@ th {
     opacity: 0.9;
 }
 
+.attack-list,
+.run-list {
+    display: grid;
+    gap: 12px;
+}
+
+.attack-item,
+.run-item {
+    padding: 16px;
+    border-radius: 18px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.attack-item-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+}
+
+.run-path {
+    margin-top: 8px;
+    font-family: Consolas, "Courier New", monospace;
+    font-size: 12px;
+    color: var(--muted);
+    overflow-wrap: anywhere;
+}
+
+.attack-item .muted {
+    margin: 10px 0 12px;
+    font-size: 14px;
+}
+
+.attack-button {
+    border: 0;
+    border-radius: 12px;
+    padding: 10px 14px;
+    color: #041019;
+    background: linear-gradient(120deg, var(--accent), var(--accent-2));
+    cursor: pointer;
+    font-weight: 700;
+}
+
+.attack-button:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.run-meta {
+    display: flex;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px 12px;
+    margin-top: 10px;
+    font-size: 13px;
+}
+
 .error-banner {
     margin-top: 18px;
     padding: 14px 16px;
@@ -287,7 +351,8 @@ th {
 
     .hero-grid,
     .content-grid,
-    .metrics-grid {
+    .metrics-grid,
+    .attack-grid {
         grid-template-columns: 1fr;
     }
 }

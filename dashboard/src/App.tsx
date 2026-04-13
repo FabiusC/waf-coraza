@@ -13,6 +13,63 @@ const emptySnapshot: Snapshot = {
   generated: '--',
 };
 
+type AttackScenario = {
+  id: string;
+  title: string;
+  description: string;
+  path: string;
+  expectedBlocked: boolean;
+};
+
+type AttackRun = {
+  id: string;
+  title: string;
+  path: string;
+  status: number;
+  blocked: boolean;
+  expectedBlocked: boolean;
+  error: string | null;
+  time: string;
+};
+
+const attackScenarios: AttackScenario[] = [
+  {
+    id: 'control',
+    title: 'Control legitimo',
+    description: 'Peticion normal a /app. Debe pasar sin bloqueo.',
+    path: '/app',
+    expectedBlocked: false,
+  },
+  {
+    id: 'admin-scan',
+    title: 'Escaneo de ruta admin',
+    description: 'Prueba una ruta tipica de reconocimiento.',
+    path: '/admin',
+    expectedBlocked: true,
+  },
+  {
+    id: 'path-traversal',
+    title: 'Intento path traversal',
+    description: 'Incluye ../ para disparar deteccion de ruta sospechosa.',
+    path: '/../../etc/passwd',
+    expectedBlocked: true,
+  },
+  {
+    id: 'sqli-probe',
+    title: 'Sondeo SQLi',
+    description: 'Incluye patron union select dentro de la URL.',
+    path: '/app?q=union%20select%20username%2Cpassword',
+    expectedBlocked: true,
+  },
+  {
+    id: 'xss-probe',
+    title: 'Sondeo XSS',
+    description: 'Incluye un payload simple de script en query string.',
+    path: '/app?q=%3Cscript%3Ealert(1)%3C/script%3E',
+    expectedBlocked: true,
+  },
+];
+
 function formatTime(value: string) {
   if (!value) return '--';
   return new Date(value).toLocaleTimeString('es-ES', {
@@ -25,6 +82,8 @@ function formatTime(value: string) {
 function App() {
   const [snapshot, setSnapshot] = useState<Snapshot>(emptySnapshot);
   const [error, setError] = useState<string | null>(null);
+  const [attackRuns, setAttackRuns] = useState<AttackRun[]>([]);
+  const [runningScenarioId, setRunningScenarioId] = useState<string | null>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -58,6 +117,46 @@ function App() {
   }, []);
 
   const blockedRecent = useMemo(() => snapshot.recent.filter((event) => event.blocked), [snapshot.recent]);
+
+  const runScenario = async (scenario: AttackScenario) => {
+    setRunningScenarioId(scenario.id);
+    const startedAt = new Date().toISOString();
+
+    try {
+      const response = await fetch(`${API_BASE}${scenario.path}`, { cache: 'no-store' });
+      const blocked = response.status === 403;
+
+      setAttackRuns((prev) => [
+        {
+          id: `${scenario.id}-${Date.now()}`,
+          title: scenario.title,
+          path: scenario.path,
+          status: response.status,
+          blocked,
+          expectedBlocked: scenario.expectedBlocked,
+          error: null,
+          time: startedAt,
+        },
+        ...prev,
+      ].slice(0, 8));
+    } catch (cause) {
+      setAttackRuns((prev) => [
+        {
+          id: `${scenario.id}-${Date.now()}`,
+          title: scenario.title,
+          path: scenario.path,
+          status: 0,
+          blocked: false,
+          expectedBlocked: scenario.expectedBlocked,
+          error: cause instanceof Error ? cause.message : 'Error de conexion',
+          time: startedAt,
+        },
+        ...prev,
+      ].slice(0, 8));
+    } finally {
+      setRunningScenarioId(null);
+    }
+  };
 
   return (
     <main className="page-shell">
@@ -115,6 +214,77 @@ function App() {
           <span className="label">Bloqueos recientes</span>
           <strong>{blockedRecent.length}</strong>
           <p>Últimas entradas marcadas por el WAF.</p>
+        </article>
+      </section>
+
+      <section className="attack-grid">
+        <article className="card panel">
+          <div className="panel-head">
+            <div>
+              <span className="label">Laboratorio WAF</span>
+              <h2>Pruebas controladas desde el dashboard</h2>
+            </div>
+            <span className="chip danger-chip">Testing</span>
+          </div>
+
+          <div className="attack-list">
+            {attackScenarios.map((scenario) => (
+              <div className="attack-item" key={scenario.id}>
+                <div className="attack-item-head">
+                  <strong>{scenario.title}</strong>
+                  <span className={`pill ${scenario.expectedBlocked ? 'pill-danger' : 'pill-ok'}`}>
+                    {scenario.expectedBlocked ? 'Debe bloquear' : 'Debe permitir'}
+                  </span>
+                </div>
+                <div className="run-path">{scenario.path}</div>
+                <p className="muted">{scenario.description}</p>
+                <button
+                  className="attack-button"
+                  onClick={() => runScenario(scenario)}
+                  disabled={runningScenarioId !== null}
+                >
+                  {runningScenarioId === scenario.id ? 'Ejecutando...' : 'Ejecutar prueba'}
+                </button>
+              </div>
+            ))}
+          </div>
+        </article>
+
+        <article className="card panel">
+          <div className="panel-head">
+            <div>
+              <span className="label">Resultado</span>
+              <h2>Historial de validacion</h2>
+            </div>
+            <span className="chip">Ultimas 8</span>
+          </div>
+
+          <div className="run-list">
+            {attackRuns.length === 0 ? (
+              <div className="event empty-event">
+                <span>Aun no se ejecutaron pruebas.</span>
+              </div>
+            ) : (
+              attackRuns.map((run) => {
+                const matchExpected = run.error ? false : run.blocked === run.expectedBlocked;
+                return (
+                  <div className="run-item" key={run.id}>
+                    <div className="attack-item-head">
+                      <strong>{run.title}</strong>
+                      <span className={`pill ${matchExpected ? 'pill-ok' : 'pill-danger'}`}>
+                        {matchExpected ? 'Comportamiento esperado' : 'Revisar regla'}
+                      </span>
+                    </div>
+                    <div className="run-path">{run.path}</div>
+                    <div className="run-meta muted">
+                      <span>{formatTime(run.time)}</span>
+                      <span>{run.error ? `Error: ${run.error}` : `HTTP ${run.status}`}</span>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
         </article>
       </section>
 
