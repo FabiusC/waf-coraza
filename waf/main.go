@@ -159,13 +159,15 @@ func main() {
 
 func createWAF() (coraza.WAF, error) {
 	return coraza.NewWAF(coraza.NewWAFConfig().WithDirectives(`
-SecRule REQUEST_URI "@rx (?i)(\.\./|\.\\.\\|%2e%2e%2f)" "id:1004,phase:1,deny,status:403,log,msg:'Path traversal detectado'"
-SecRule REQUEST_URI "@beginsWith /admin" "id:1001,phase:2,deny,status:403,log,msg:'Acceso a /admin bloqueado'"
-SecRule REQUEST_URI "@beginsWith /wp-admin" "id:1002,phase:2,deny,status:403,log,msg:'Acceso a /wp-admin bloqueado'"
-SecRule REQUEST_URI "@beginsWith /phpmyadmin" "id:1003,phase:2,deny,status:403,log,msg:'Acceso a /phpmyadmin bloqueado'"
-SecRule REQUEST_URI "@rx (?i)union\s+select" "id:1005,phase:2,deny,status:403,log,msg:'Patron SQLi detectado'"
-SecRule REQUEST_URI "@rx (?i)<script" "id:1006,phase:2,deny,status:403,log,msg:'XSS detectado'"
-SecRule REQUEST_HEADERS:User-Agent "@rx (?i)(sqlmap|nikto|nmap|masscan|python-requests)" "id:1007,phase:1,deny,status:403,log,msg:'User-agent malicioso'"
+SecRule REQUEST_URI "@contains /admin" "id:1001,phase:1,deny,status:403,log,msg:'Acceso a /admin bloqueado'"
+SecRule REQUEST_URI "@contains /wp-admin" "id:1002,phase:1,deny,status:403,log,msg:'Acceso a /wp-admin bloqueado'"
+SecRule REQUEST_URI "@contains /phpmyadmin" "id:1003,phase:1,deny,status:403,log,msg:'Acceso a /phpmyadmin bloqueado'"
+SecRule REQUEST_URI "@rx \\.\\./|\\.\\\\/" "id:1004,phase:1,deny,status:403,log,msg:'Path traversal detectado'"
+SecRule REQUEST_URI "@icontains union" "id:1005,phase:1,deny,status:403,log,msg:'Patron SQLi detectado'"
+SecRule REQUEST_URI "@icontains select%20" "id:1005b,phase:1,deny,status:403,log,msg:'Patron SQLi detectado'"
+SecRule REQUEST_URI "@icontains <script" "id:1006,phase:1,deny,status:403,log,msg:'XSS detectado'"
+SecRule REQUEST_URI "@icontains %3Cscript" "id:1006b,phase:1,deny,status:403,log,msg:'XSS detectado'"
+SecRule REQUEST_HEADERS:User-Agent "@icontains sqlmap" "id:1007,phase:1,deny,status:403,log,msg:'User-agent malicioso'"
 `))
 }
 
