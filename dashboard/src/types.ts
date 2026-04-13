@@ -2,9 +2,9 @@ export type Event = {
   time: string;
   method: string;
   path: string;
-  url: string;
-  headers: Array<{ name: string; value: string }>;
-  cookies: Array<{ name: string; value: string }>;
+  url?: string;
+  headers?: Array<{ name: string; value: string }>;
+  cookies?: Array<{ name: string; value: string }>;
   body?: string;
   clientIp: string;
   userAgent: string;

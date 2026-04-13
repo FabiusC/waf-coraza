@@ -99,6 +99,23 @@ const attackScenarios: AttackScenario[] = [
   },
 ];
 
+function normalizeEvent(event: TrafficEvent): TrafficEvent {
+  return {
+    ...event,
+    url: event.url ?? event.path,
+    headers: Array.isArray(event.headers) ? event.headers : [],
+    cookies: Array.isArray(event.cookies) ? event.cookies : [],
+    body: typeof event.body === 'string' ? event.body : '',
+  };
+}
+
+function normalizeSnapshot(snapshot: Snapshot): Snapshot {
+  return {
+    ...snapshot,
+    recent: Array.isArray(snapshot.recent) ? snapshot.recent.map(normalizeEvent) : [],
+  };
+}
+
 function formatTime(value: string) {
   if (!value) return '--';
 
@@ -126,7 +143,7 @@ function App() {
           throw new Error(`HTTP ${response.status}`);
         }
 
-        const data = (await response.json()) as Snapshot;
+        const data = normalizeSnapshot((await response.json()) as Snapshot);
         if (mounted) {
           setSnapshot(data);
           setError(null);
@@ -436,7 +453,7 @@ function App() {
                   <h3>
                     {selectedEvent.method} {selectedEvent.path}
                   </h3>
-                  <div className="muted">URL completa: {selectedEvent.url}</div>
+                  <div className="muted">URL completa: {selectedEvent.url ?? selectedEvent.path}</div>
                 </div>
                 <div className="detail-meta">
                   <span>IP: {selectedEvent.clientIp}</span>
@@ -448,11 +465,11 @@ function App() {
               <div className="detail-grid">
                 <article className="detail-card">
                   <span className="detail-label">Headers</span>
-                  {selectedEvent.headers.length === 0 ? (
+                  {(selectedEvent.headers ?? []).length === 0 ? (
                     <div className="detail-empty">Sin headers registrados.</div>
                   ) : (
                     <div className="kv-list">
-                      {selectedEvent.headers.map((header) => (
+                      {(selectedEvent.headers ?? []).map((header) => (
                         <div className="kv-item" key={`${header.name}-${header.value}`}>
                           <span className="kv-key">{header.name}</span>
                           <span className="kv-value">{header.value}</span>
@@ -464,11 +481,11 @@ function App() {
 
                 <article className="detail-card">
                   <span className="detail-label">Cookies</span>
-                  {selectedEvent.cookies.length === 0 ? (
+                  {(selectedEvent.cookies ?? []).length === 0 ? (
                     <div className="detail-empty">Sin cookies visibles en este request.</div>
                   ) : (
                     <div className="kv-list">
-                      {selectedEvent.cookies.map((cookie) => (
+                      {(selectedEvent.cookies ?? []).map((cookie) => (
                         <div className="kv-item" key={`${cookie.name}-${cookie.value}`}>
                           <span className="kv-key">{cookie.name}</span>
                           <span className="kv-value">{cookie.value}</span>
