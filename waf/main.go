@@ -23,6 +23,10 @@ type Event struct {
 	Time          string `json:"time"`
 	Method        string `json:"method"`
 	Path          string `json:"path"`
+	URL           string `json:"url"`
+	Headers       []nameValue `json:"headers,omitempty"`
+	Cookies       []nameValue `json:"cookies,omitempty"`
+	Body          string `json:"body,omitempty"`
 	ClientIP      string `json:"clientIp"`
 	UserAgent     string `json:"userAgent"`
 	Status        int    `json:"status"`
@@ -122,6 +126,13 @@ type ruleSummary struct {
 	messages []string
 }
 
+type nameValue struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
+}
+
+const maxLoggedBodyBytes = 1 << 20
+
 func main() {
 	store := &Store{}
 	waf, err := createWAF()
@@ -185,9 +196,16 @@ SecRule ARGS "@rx (?i)(<script|%3Cscript)" "id:104,phase:2,deny,status:403,msg:'
 
 func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		origin := r.Header.Get("Origin")
+		if origin == "" {
+			origin = "*"
+		}
+
+		w.Header().Set("Access-Control-Allow-Origin", origin)
+		w.Header().Add("Vary", "Origin")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With, X-Debug-Trace, X-Debug-Scenario")
+		w.Header().Set("Access-Control-Allow-Credentials", "true")
 
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
@@ -201,6 +219,10 @@ func corsMiddleware(next http.Handler) http.Handler {
 func wafMiddleware(waf coraza.WAF, store *Store, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
+		requestBody, err := readAndRestoreBody(r)
+		if err != nil {
+			log.Printf("no se pudo leer el body de %s: %v", r.URL.RequestURI(), err)
+		}
 		tx := waf.NewTransactionWithID(strconv.FormatInt(time.Now().UnixNano(), 10))
 		defer func() {
 			tx.ProcessLogging()
@@ -239,7 +261,7 @@ func wafMiddleware(waf coraza.WAF, store *Store, next http.Handler) http.Handler
 				statusCode = http.StatusForbidden
 			}
 
-			store.Add(newEvent(r, tx.ID(), statusCode, true, summary, time.Since(start)))
+			store.Add(newEvent(r, tx.ID(), statusCode, true, summary, time.Since(start), requestBody))
 			http.Error(w, http.StatusText(statusCode), statusCode)
 			return
 		}
@@ -254,16 +276,21 @@ func wafMiddleware(waf coraza.WAF, store *Store, next http.Handler) http.Handler
 		w.WriteHeader(recorder.statusCode)
 		_, _ = io.Copy(w, &recorder.body)
 
-		store.Add(newEvent(r, tx.ID(), recorder.statusCode, false, summary, time.Since(start)))
+		store.Add(newEvent(r, tx.ID(), recorder.statusCode, false, summary, time.Since(start), requestBody))
 	})
 }
 
-func newEvent(r *http.Request, transactionID string, statusCode int, blocked bool, summary ruleSummary, duration time.Duration) Event {
-	curl := buildCurlCommand(r)
+func newEvent(r *http.Request, transactionID string, statusCode int, blocked bool, summary ruleSummary, duration time.Duration, requestBody string) Event {
+	url := buildFullURL(r)
+	curl := buildCurlCommand(r, requestBody)
 	return Event{
 		Time:          time.Now().Format(time.RFC3339),
 		Method:        r.Method,
 		Path:          r.URL.RequestURI(),
+		URL:           url,
+		Headers:       collectHeaders(r.Header),
+		Cookies:       collectCookies(r.Cookies()),
+		Body:          requestBody,
 		ClientIP:      requestIP(r.RemoteAddr),
 		UserAgent:     r.UserAgent(),
 		Status:        statusCode,
@@ -276,13 +303,73 @@ func newEvent(r *http.Request, transactionID string, statusCode int, blocked boo
 	}
 }
 
-func buildCurlCommand(r *http.Request) string {
+func buildCurlCommand(r *http.Request, requestBody string) string {
 	cmd := fmt.Sprintf("curl -X %s", r.Method)
-	if ua := r.UserAgent(); ua != "" {
-		cmd += fmt.Sprintf(" -H 'User-Agent: %s'", ua)
+	for _, header := range collectHeaders(r.Header) {
+		cmd += fmt.Sprintf(" -H '%s: %s'", escapeSingleQuotes(header.Name), escapeSingleQuotes(header.Value))
 	}
-	cmd += fmt.Sprintf(" '%s://%s%s'", getScheme(r), r.Host, r.URL.RequestURI())
+	if requestBody != "" {
+		cmd += fmt.Sprintf(" --data-raw '%s'", escapeSingleQuotes(requestBody))
+	}
+	cmd += fmt.Sprintf(" '%s'", escapeSingleQuotes(buildFullURL(r)))
 	return cmd
+}
+
+func buildFullURL(r *http.Request) string {
+	return fmt.Sprintf("%s://%s%s", getScheme(r), r.Host, r.URL.RequestURI())
+}
+
+func collectHeaders(headers http.Header) []nameValue {
+	keys := make([]string, 0, len(headers))
+	for key := range headers {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	result := make([]nameValue, 0, len(keys))
+	for _, key := range keys {
+		values := append([]string(nil), headers.Values(key)...)
+		sort.Strings(values)
+		for _, value := range values {
+			result = append(result, nameValue{Name: key, Value: value})
+		}
+	}
+
+	return result
+}
+
+func collectCookies(cookies []*http.Cookie) []nameValue {
+	result := make([]nameValue, 0, len(cookies))
+	for _, cookie := range cookies {
+		result = append(result, nameValue{Name: cookie.Name, Value: cookie.Value})
+	}
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].Name < result[j].Name
+	})
+	return result
+}
+
+func readAndRestoreBody(r *http.Request) (string, error) {
+	if r.Body == nil {
+		return "", nil
+	}
+
+	bodyBytes, err := io.ReadAll(r.Body)
+	if err != nil {
+		return "", err
+	}
+
+	r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+
+	if len(bodyBytes) > maxLoggedBodyBytes {
+		bodyBytes = bodyBytes[:maxLoggedBodyBytes]
+	}
+
+	return string(bodyBytes), nil
+}
+
+func escapeSingleQuotes(value string) string {
+	return strings.ReplaceAll(value, "'", "'\"'\"'")
 }
 
 func getScheme(r *http.Request) string {

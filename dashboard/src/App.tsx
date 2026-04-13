@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { Snapshot } from './types';
+import type { Event as TrafficEvent, Snapshot } from './types';
 
 const API_BASE = (import.meta.env.VITE_WAF_API_URL as string | undefined)?.replace(/\/$/, '') ?? 'http://localhost:8080';
 
@@ -17,7 +17,10 @@ type AttackScenario = {
   id: string;
   title: string;
   description: string;
+  method: string;
   path: string;
+  headers?: Record<string, string>;
+  body?: string;
   expectedBlocked: boolean;
 };
 
@@ -35,29 +38,33 @@ type AttackRun = {
 const attackScenarios: AttackScenario[] = [
   {
     id: 'control',
-    title: 'Control legitimo',
-    description: 'Peticion normal a /app. Debe pasar sin bloqueo.',
+    title: 'Control legítimo',
+    description: 'Petición normal a /app. Debe pasar sin bloqueo.',
+    method: 'GET',
     path: '/app',
     expectedBlocked: false,
   },
   {
     id: 'admin-scan',
     title: 'Escaneo de ruta admin',
-    description: 'Prueba una ruta tipica de reconocimiento.',
+    description: 'Prueba una ruta típica de reconocimiento.',
+    method: 'GET',
     path: '/admin',
     expectedBlocked: true,
   },
   {
     id: 'path-traversal',
     title: 'Intento path traversal',
-    description: 'Incluye traversal en parametro file para disparar la regla ARGS.',
+    description: 'Incluye traversal en parámetro file para disparar la regla ARGS.',
+    method: 'GET',
     path: '/app?file=../../etc/passwd',
     expectedBlocked: true,
   },
   {
     id: 'sqli-probe',
     title: 'Sondeo SQLi',
-    description: 'Incluye patron union select dentro de la URL.',
+    description: 'Incluye patrón union select dentro de la URL.',
+    method: 'GET',
     path: '/app?q=union%20select%20username%2Cpassword',
     expectedBlocked: true,
   },
@@ -65,13 +72,36 @@ const attackScenarios: AttackScenario[] = [
     id: 'xss-probe',
     title: 'Sondeo XSS',
     description: 'Incluye un payload simple de script en query string.',
+    method: 'GET',
     path: '/app?q=%3Cscript%3Ealert(1)%3C/script%3E',
     expectedBlocked: true,
+  },
+  {
+    id: 'body-probe',
+    title: 'Carga HTTP con body',
+    description: 'Envía JSON con headers extra para inspeccionar body, URL y cabeceras.',
+    method: 'POST',
+    path: '/app?source=dashboard-body',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Debug-Trace': 'dashboard',
+    },
+    body: JSON.stringify(
+      {
+        message: 'hola desde el dashboard',
+        role: 'tester',
+        nested: { ok: true },
+      },
+      null,
+      2,
+    ),
+    expectedBlocked: false,
   },
 ];
 
 function formatTime(value: string) {
   if (!value) return '--';
+
   return new Date(value).toLocaleTimeString('es-ES', {
     hour: '2-digit',
     minute: '2-digit',
@@ -84,6 +114,7 @@ function App() {
   const [error, setError] = useState<string | null>(null);
   const [attackRuns, setAttackRuns] = useState<AttackRun[]>([]);
   const [runningScenarioId, setRunningScenarioId] = useState<string | null>(null);
+  const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -116,6 +147,26 @@ function App() {
     };
   }, []);
 
+  useEffect(() => {
+    if (!snapshot.recent.length) {
+      setSelectedEventId(null);
+      return;
+    }
+
+    const hasSelection = snapshot.recent.some((event) => event.transactionId === selectedEventId);
+    if (!hasSelection) {
+      setSelectedEventId(snapshot.recent[0].transactionId);
+    }
+  }, [selectedEventId, snapshot.recent]);
+
+  const selectedEvent = useMemo<TrafficEvent | null>(() => {
+    if (!snapshot.recent.length) {
+      return null;
+    }
+
+    return snapshot.recent.find((event) => event.transactionId === selectedEventId) ?? snapshot.recent[0];
+  }, [selectedEventId, snapshot.recent]);
+
   const blockedRecent = useMemo(() => snapshot.recent.filter((event) => event.blocked), [snapshot.recent]);
 
   const runScenario = async (scenario: AttackScenario) => {
@@ -123,8 +174,13 @@ function App() {
     const startedAt = new Date().toISOString();
 
     try {
-      const response = await fetch(`${API_BASE}${scenario.path}`, { cache: 'no-store' });
-      const blocked = response.status === 403;
+      const response = await fetch(`${API_BASE}${scenario.path}`, {
+        method: scenario.method,
+        headers: scenario.headers,
+        body: scenario.body,
+        credentials: 'include',
+        cache: 'no-store',
+      });
 
       setAttackRuns((prev) => [
         {
@@ -132,7 +188,7 @@ function App() {
           title: scenario.title,
           path: scenario.path,
           status: response.status,
-          blocked,
+          blocked: response.status === 403,
           expectedBlocked: scenario.expectedBlocked,
           error: null,
           time: startedAt,
@@ -148,7 +204,7 @@ function App() {
           status: 0,
           blocked: false,
           expectedBlocked: scenario.expectedBlocked,
-          error: cause instanceof Error ? cause.message : 'Error de conexion',
+          error: cause instanceof Error ? cause.message : 'Error de conexión',
           time: startedAt,
         },
         ...prev,
@@ -162,11 +218,11 @@ function App() {
     <main className="page-shell">
       <section className="hero-grid">
         <article className="hero card">
-          <span className="eyebrow">Coraza WAF · Netlify dashboard</span>
+          <span className="eyebrow">Coraza WAF · Dashboard</span>
           <h1>Monitoreo de tráfico y amenazas en tiempo real</h1>
           <p>
-            Este panel consume la API del backend en Fly.io y refleja solicitudes permitidas,
-            bloqueadas y las reglas que dispararon una interrupción.
+            Este panel consume la API del backend y muestra las solicitudes permitidas, bloqueadas
+            y el detalle HTTP de cada evento para inspección manual.
           </p>
           <div className="hero-meta">
             <span>API: {API_BASE}</span>
@@ -236,12 +292,15 @@ function App() {
                     {scenario.expectedBlocked ? 'Debe bloquear' : 'Debe permitir'}
                   </span>
                 </div>
-                <div className="run-path">{scenario.path}</div>
+                <div className="run-path">
+                  {scenario.method} {scenario.path}
+                </div>
                 <p className="muted">{scenario.description}</p>
                 <button
                   className="attack-button"
                   onClick={() => runScenario(scenario)}
                   disabled={runningScenarioId !== null}
+                  type="button"
                 >
                   {runningScenarioId === scenario.id ? 'Ejecutando...' : 'Ejecutar prueba'}
                 </button>
@@ -254,28 +313,25 @@ function App() {
           <div className="panel-head">
             <div>
               <span className="label">Resultado</span>
-              <h2>Historial de validacion</h2>
+              <h2>Historial de validación</h2>
             </div>
-            <span className="chip">Ultimas 8</span>
+            <span className="chip">Últimas 8</span>
           </div>
 
           <div className="run-list">
             {attackRuns.length === 0 ? (
               <div className="event empty-event">
-                <span>Aun no se ejecutaron pruebas.</span>
+                <span>Aún no se ejecutaron pruebas.</span>
               </div>
             ) : (
               attackRuns.map((run) => {
-                const wasBlocked = run.status === 403;
-                const matchExpected = run.error ? false : wasBlocked === run.expectedBlocked;
-                
                 let resultLabel = '';
                 let resultClass = '';
-                
+
                 if (run.error) {
                   resultLabel = 'ERROR DE CONEXIÓN';
                   resultClass = 'result-error';
-                } else if (wasBlocked) {
+                } else if (run.blocked) {
                   resultLabel = '✓ BLOQUEADO por WAF';
                   resultClass = 'result-blocked';
                 } else if (run.expectedBlocked) {
@@ -285,14 +341,12 @@ function App() {
                   resultLabel = '✓ PERMITIDO (correcto)';
                   resultClass = 'result-allowed';
                 }
-                
+
                 return (
                   <div className={`run-item ${resultClass}`} key={run.id}>
                     <div className="attack-item-head">
                       <strong>{run.title}</strong>
-                      <span className={`pill pill-result ${resultClass}`}>
-                        {resultLabel}
-                      </span>
+                      <span className={`pill pill-result ${resultClass}`}>{resultLabel}</span>
                     </div>
                     <div className="run-path">{run.path}</div>
                     <div className="run-meta muted">
@@ -324,7 +378,12 @@ function App() {
               </div>
             ) : (
               snapshot.recent.map((event) => (
-                <div className="console-entry" key={event.transactionId + event.time}>
+                <button
+                  className={`console-entry ${selectedEvent?.transactionId === event.transactionId ? 'is-selected' : ''}`}
+                  key={`${event.transactionId}-${event.time}`}
+                  onClick={() => setSelectedEventId(event.transactionId)}
+                  type="button"
+                >
                   <div className="console-header">
                     <span className={`console-status ${event.blocked ? 'blocked' : 'allowed'}`}>
                       {event.status}
@@ -348,94 +407,99 @@ function App() {
                     </div>
                   )}
                   <div className="console-divider">—</div>
-                </div>
+                </button>
               ))
             )}
           </div>
         </article>
       </section>
 
-      <section className="content-grid">
-        <article className="card panel">
+      <section className="inspection-grid">
+        <article className="card panel inspector-panel">
           <div className="panel-head">
             <div>
-              <span className="label">Actividad reciente</span>
-              <h2>Últimas peticiones</h2>
+              <span className="label">Inspector HTTP</span>
+              <h2>URL, headers, cookies y body</h2>
             </div>
-            <span className="chip">Auto-refresh</span>
+            <span className="chip">Selecciona una solicitud</span>
           </div>
 
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Hora</th>
-                  <th>Ruta</th>
-                  <th>Estado</th>
-                  <th>Reglas</th>
-                </tr>
-              </thead>
-              <tbody>
-                {snapshot.recent.length === 0 ? (
-                  <tr>
-                    <td colSpan={4} className="empty-cell">
-                      Aún no hay tráfico registrado.
-                    </td>
-                  </tr>
-                ) : (
-                  snapshot.recent.map((event) => (
-                    <tr key={event.transactionId + event.time}>
-                      <td>{formatTime(event.time)}</td>
-                      <td>
-                        <strong>{event.method}</strong> {event.path}
-                        <div className="muted">{event.clientIp}</div>
-                      </td>
-                      <td>
-                        <span className={`pill ${event.blocked ? 'pill-danger' : 'pill-ok'}`}>
-                          {event.blocked ? 'Bloqueada' : 'Permitida'}
-                        </span>
-                        <div className="muted">{event.status}</div>
-                      </td>
-                      <td>
-                        <div>{event.ruleIds || 'Sin regla asociada'}</div>
-                        <div className="muted">{event.messages || 'Sin mensaje'}</div>
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        </article>
-
-        <article className="card panel">
-          <div className="panel-head">
-            <div>
-              <span className="label">Alertas</span>
-              <h2>Últimos eventos sospechosos</h2>
-            </div>
-            <span className="chip danger-chip">WAF</span>
-          </div>
-
-          <div className="event-list">
-            {blockedRecent.length === 0 ? (
-              <div className="event empty-event">
-                <span>Sin eventos maliciosos por ahora.</span>
-              </div>
-            ) : (
-              blockedRecent.slice(0, 5).map((event) => (
-                <div className="event" key={event.transactionId}>
-                  <div className="event-top">
-                    <strong>{event.path}</strong>
-                    <span className="pill pill-danger">Ataque</span>
-                  </div>
-                  <div className="muted">{event.method} · {event.clientIp} · {formatTime(event.time)}</div>
-                  <div className="event-detail">{event.messages || 'Coraza disparó una interrupción'}</div>
-                  <div className="event-detail subtle">Reglas: {event.ruleIds || 'N/A'}</div>
+          {!selectedEvent ? (
+            <div className="empty-cell">Todavía no hay eventos para inspeccionar.</div>
+          ) : (
+            <>
+              <div className="detail-hero">
+                <div>
+                  <span className={`pill ${selectedEvent.blocked ? 'pill-danger' : 'pill-ok'}`}>
+                    {selectedEvent.blocked ? 'Bloqueada' : 'Permitida'}
+                  </span>
+                  <h3>
+                    {selectedEvent.method} {selectedEvent.path}
+                  </h3>
+                  <div className="muted">URL completa: {selectedEvent.url}</div>
                 </div>
-              ))
-            )}
-          </div>
+                <div className="detail-meta">
+                  <span>IP: {selectedEvent.clientIp}</span>
+                  <span>HTTP {selectedEvent.status}</span>
+                  <span>{selectedEvent.durationMs} ms</span>
+                </div>
+              </div>
+
+              <div className="detail-grid">
+                <article className="detail-card">
+                  <span className="detail-label">Headers</span>
+                  {selectedEvent.headers.length === 0 ? (
+                    <div className="detail-empty">Sin headers registrados.</div>
+                  ) : (
+                    <div className="kv-list">
+                      {selectedEvent.headers.map((header) => (
+                        <div className="kv-item" key={`${header.name}-${header.value}`}>
+                          <span className="kv-key">{header.name}</span>
+                          <span className="kv-value">{header.value}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </article>
+
+                <article className="detail-card">
+                  <span className="detail-label">Cookies</span>
+                  {selectedEvent.cookies.length === 0 ? (
+                    <div className="detail-empty">Sin cookies visibles en este request.</div>
+                  ) : (
+                    <div className="kv-list">
+                      {selectedEvent.cookies.map((cookie) => (
+                        <div className="kv-item" key={`${cookie.name}-${cookie.value}`}>
+                          <span className="kv-key">{cookie.name}</span>
+                          <span className="kv-value">{cookie.value}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </article>
+
+                <article className="detail-card detail-card-wide">
+                  <span className="detail-label">Body HTTP</span>
+                  <pre className="body-preview">{selectedEvent.body || 'Sin body en este request.'}</pre>
+                </article>
+              </div>
+
+              <div className="detail-footer">
+                <div>
+                  <span className="detail-label">WAF</span>
+                  <div className="muted">{selectedEvent.messages || 'Sin mensaje de reglas activadas.'}</div>
+                </div>
+                <div>
+                  <span className="detail-label">Reglas</span>
+                  <div className="muted">{selectedEvent.ruleIds || 'Sin regla asociada'}</div>
+                </div>
+                <div>
+                  <span className="detail-label">Curl</span>
+                  <div className="detail-curl">{selectedEvent.curlCommand || 'Sin curl generado'}</div>
+                </div>
+              </div>
+            </>
+          )}
         </article>
       </section>
 
