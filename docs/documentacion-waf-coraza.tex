@@ -1,0 +1,279 @@
+\documentclass[12pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[spanish]{babel}
+\usepackage{geometry}
+\usepackage{hyperref}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{xcolor}
+\usepackage{listings}
+
+\geometry{margin=2.5cm}
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue,
+    urlcolor=blue,
+    pdftitle={Documentacion del aplicativo WAF Coraza},
+    pdfauthor={Equipo WAF Coraza}
+}
+
+\lstset{
+  basicstyle=\ttfamily\small,
+  breaklines=true,
+  frame=single,
+  backgroundcolor=\color{gray!8}
+}
+
+\title{Guia de Usuario e Instalacion\\WAF Coraza + Dashboard}
+\author{Proyecto mi-waf-coraza}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+\tableofcontents
+\newpage
+
+\section{Resumen}
+Este aplicativo implementa una \textbf{WAF (Web Application Firewall) con Coraza} en un backend Go y un \textbf{dashboard web} en React para monitoreo y pruebas de ataques.
+
+\textbf{Objetivo principal:} detectar y bloquear trafico malicioso (SQLi, XSS, path traversal, escaneo de rutas administrativas, user-agents ofensivos) y visualizar en interfaz los eventos permitidos y bloqueados en tiempo real.
+
+\section{Enlaces Oficiales del Proyecto}
+\begin{itemize}
+  \item Backend WAF desplegado (Render): \href{https://waf-coraza.onrender.com}{https://waf-coraza.onrender.com}
+  \item Frontend Dashboard (Netlify): \href{https://waf-coraza.netlify.app}{https://waf-coraza.netlify.app}
+\end{itemize}
+
+\section{Guia de Usuario}
+\subsection{Uso desde navegador}
+\begin{enumerate}
+  \item Abrir el dashboard: \href{https://waf-coraza.netlify.app}{https://waf-coraza.netlify.app}.
+  \item Revisar los paneles de metricas (total, permitidas, bloqueadas).
+  \item Ejecutar escenarios de prueba desde el laboratorio WAF.
+  \item Validar los resultados en:
+  \begin{itemize}
+    \item Historial de validacion
+    \item Consola de trafico
+    \item Actividad reciente
+  \end{itemize}
+\end{enumerate}
+
+\subsection{Uso desde consola (cualquier equipo)}
+El backend esta publicado y puede recibir solicitudes desde cualquier cliente HTTP.
+
+\textbf{Prueba legitima (esperado 200):}
+\begin{lstlisting}
+curl -i "https://waf-coraza.onrender.com/app"
+\end{lstlisting}
+
+\textbf{Pruebas maliciosas (esperado 403):}
+\begin{lstlisting}
+curl -i "https://waf-coraza.onrender.com/admin"
+curl -i "https://waf-coraza.onrender.com/app?q=union%20select%201"
+curl -i "https://waf-coraza.onrender.com/app?q=%3Cscript%3Ealert(1)%3C/script%3E"
+curl -i "https://waf-coraza.onrender.com/app?file=../../etc/passwd"
+\end{lstlisting}
+
+\textbf{Criterio de validacion:}
+\begin{itemize}
+  \item Solicitudes maliciosas responden HTTP 403.
+  \item Solicitudes legitimas responden HTTP 200.
+  \item Los eventos se reflejan en el dashboard con estado y reglas asociadas.
+\end{itemize}
+
+\section{Arquitectura del Sistema}
+\subsection{Estructura del Monorepo}
+\begin{itemize}
+  \item \texttt{waf/}: backend en Go con middleware Coraza.
+  \item \texttt{dashboard/}: frontend en React + TypeScript + Vite.
+  \item \texttt{netlify.toml}: configuracion de build y publish para el frontend.
+\end{itemize}
+
+\subsection{Diagrama Logico}
+\begin{enumerate}
+  \item Cliente (navegador o curl) envia solicitud HTTP.
+  \item Middleware Coraza procesa conexion, URI, headers y body/ARGS.
+  \item Si una regla hace match con accion \texttt{deny}, responde \texttt{403}.
+  \item Si no hay interrupcion, la solicitud llega al handler de aplicacion.
+  \item Se registra evento en memoria para estadisticas y consola de trafico.
+\end{enumerate}
+
+\section{Backend WAF (Go + Coraza)}
+\subsection{Tecnologias}
+\begin{itemize}
+  \item Go (net/http)
+  \item Coraza WAF v3
+  \item Middleware custom para inspeccion y registro de eventos
+\end{itemize}
+
+\subsection{Configuracion clave de Coraza}
+La inicializacion de la WAF contempla directivas base de operacion:
+
+\begin{lstlisting}
+SecRuleEngine On
+SecDefaultAction "phase:2,log,deny,status:403"
+SecRequestBodyAccess On
+SecRequestBodyLimit 134217728
+\end{lstlisting}
+
+\textbf{Puntos clave:}
+\begin{itemize}
+  \item \texttt{SecRuleEngine On}: habilita ejecucion de reglas.
+  \item \texttt{SecDefaultAction}: define accion por defecto de bloqueo y logging en fase 2.
+  \item \texttt{SecRequestBodyAccess On}: habilita inspeccion de cuerpo/parametros.
+  \item En middleware se ejecuta procesamiento de headers y body para activar reglas \texttt{phase:2} y sobre \texttt{ARGS}.
+\end{itemize}
+
+\subsection{Reglas WAF implementadas}
+\begin{longtable}{|>{\raggedright\arraybackslash}p{1.5cm}|>{\raggedright\arraybackslash}p{3.5cm}|>{\raggedright\arraybackslash}p{6.2cm}|>{\raggedright\arraybackslash}p{2.5cm}|}
+\hline
+\textbf{ID} & \textbf{Variable} & \textbf{Patron/Objetivo} & \textbf{Accion} \\
+\hline
+100 & ARGS & \texttt{@rx (?i)union.*select} (sondeo SQLi) & deny 403 \\
+\hline
+101 & REQUEST\_HEADERS:User-Agent & \texttt{@rx (?i)(sqlmap|nikto|nmap|masscan)} & deny 403 \\
+\hline
+102 & REQUEST\_URI & \texttt{@contains /admin} (escaneo admin) & deny 403 \\
+\hline
+103 & REQUEST\_URI & \texttt{@rx (?i)(\.\./|\.\\\\)} (path traversal) & deny 403 \\
+\hline
+104 & ARGS & \texttt{@rx (?i)(<script|\%3Cscript)} (XSS) & deny 403 \\
+\hline
+105 & REQUEST\_URI & \texttt{@contains \%2e\%2e} (traversal encoded) & deny 403 \\
+\hline
+106 & ARGS & \texttt{@rx (?i)(\.\./|\%2e\%2e\%2f|\%2e\%2e/)} traversal en parametros & deny 403 \\
+\hline
+\end{longtable}
+
+\subsection{Endpoints del backend}
+\begin{itemize}
+  \item \texttt{/healthz}: health check del servicio.
+  \item \texttt{/app}: endpoint legitimo de aplicacion.
+  \item \texttt{/api/stats}: metricas agregadas (total, permitidas, bloqueadas).
+  \item \texttt{/api/recent}: eventos recientes en memoria.
+\end{itemize}
+
+\subsection{Modelo de evento monitoreado}
+Cada solicitud almacena campos como:
+\begin{itemize}
+  \item metodo, path, user-agent, IP cliente
+  \item status HTTP
+  \item bandera \texttt{blocked}
+  \item IDs y mensajes de reglas coincidentes
+  \item transaccion Coraza y tiempo de respuesta (ms)
+  \item comando curl reconstruido para consola de trafico
+\end{itemize}
+
+\section{Frontend Dashboard (React + TypeScript)}
+\subsection{Tecnologias y build}
+\begin{itemize}
+  \item React + TypeScript + Vite
+  \item Variable de entorno principal: \texttt{VITE\_WAF\_API\_URL}
+  \item Build y deploy en Netlify
+\end{itemize}
+
+\subsection{Puntos clave funcionales del frontend}
+\begin{itemize}
+  \item Panel de metricas: total, permitidas y \textbf{eventos bloqueados}.
+  \item Laboratorio WAF con escenarios predefinidos (control legitimo y ataques).
+  \item Historial de validacion con semaforo visual:
+  \begin{itemize}
+    \item \texttt{403} esperado $\Rightarrow$ \textbf{BLOQUEADO}
+    \item \texttt{200/404} en escenario que debe bloquearse $\Rightarrow$ \textbf{NO BLOQUEADO}
+    \item escenario legitimo permitido $\Rightarrow$ \textbf{PERMITIDO}
+  \end{itemize}
+  \item Consola de trafico con comando curl, status y mensaje de regla.
+  \item Auto-refresh periodico contra \texttt{/api/stats} y \texttt{/api/recent}.
+\end{itemize}
+
+\subsection{Escenarios de prueba del laboratorio}
+\begin{enumerate}
+  \item Control legitimo: \texttt{/app} (debe permitir).
+  \item Escaneo admin: \texttt{/admin} (debe bloquear).
+  \item Path traversal: \texttt{/app?file=../../etc/passwd} (debe bloquear).
+  \item SQLi probe: query con \texttt{union select} (debe bloquear).
+  \item XSS probe: query con \texttt{<script>} (debe bloquear).
+\end{enumerate}
+
+\section{Instalacion y Ejecucion (Monorepo)}
+\subsection{Requisitos}
+\begin{itemize}
+  \item Go 1.23 o superior
+  \item Node.js 20 o superior
+  \item npm 10 o superior
+\end{itemize}
+
+\subsection{Clonacion del repositorio}
+\begin{lstlisting}
+git clone <URL_DEL_REPOSITORIO>
+cd waf-coraza
+\end{lstlisting}
+
+\subsection{Ejecucion local del backend (waf)}
+\begin{lstlisting}
+cd waf
+go mod tidy
+go run .
+\end{lstlisting}
+
+Backend local disponible en \texttt{http://localhost:8080}.
+
+\subsection{Ejecucion local del frontend (dashboard)}
+En otra terminal:
+
+\begin{lstlisting}
+cd dashboard
+npm install
+\end{lstlisting}
+
+Crear archivo \texttt{dashboard/.env}:
+\begin{lstlisting}
+VITE_WAF_API_URL=http://localhost:8080
+\end{lstlisting}
+
+Iniciar frontend:
+\begin{lstlisting}
+npm run dev
+\end{lstlisting}
+
+Frontend local disponible normalmente en \texttt{http://localhost:5173}.
+
+\section{Operacion y Verificacion}
+\subsection{Pruebas recomendadas con curl}
+\begin{lstlisting}
+# Debe bloquear (403)
+curl -i "https://waf-coraza.onrender.com/admin"
+curl -i "https://waf-coraza.onrender.com/app?q=union%20select%20user"
+curl -i "https://waf-coraza.onrender.com/app?q=%3Cscript%3Ealert(1)%3C/script%3E"
+curl -i "https://waf-coraza.onrender.com/app?file=../../etc/passwd"
+
+# Debe permitir (200)
+curl -i "https://waf-coraza.onrender.com/app"
+\end{lstlisting}
+
+\subsection{Criterio de aceptacion}
+Se considera correcto cuando:
+\begin{itemize}
+  \item Los escenarios maliciosos retornan \texttt{HTTP 403}.
+  \item El contador \textbf{Eventos bloqueados} incrementa en dashboard.
+  \item En \texttt{Bloqueos recientes} aparecen rule IDs y mensajes de Coraza.
+\end{itemize}
+
+\section{Despliegue y Mantenimiento}
+\begin{itemize}
+  \item Backend productivo en Render: \href{https://waf-coraza.onrender.com}{https://waf-coraza.onrender.com}
+  \item Frontend productivo en Netlify: \href{https://waf-coraza.netlify.app}{https://waf-coraza.netlify.app}
+  \item Configurar en Netlify la variable \texttt{VITE\_WAF\_API\_URL=https://waf-coraza.onrender.com}.
+\end{itemize}
+
+\section{Conclusiones}
+El aplicativo implementa una arquitectura completa de defensa y observabilidad:
+\begin{itemize}
+  \item WAF activa con reglas explicitas para amenazas comunes.
+  \item Dashboard para visibilidad operativa y validacion funcional.
+  \item Integracion desplegada con enlaces productivos y pruebas reproducibles.
+\end{itemize}
+
+\end{document}
